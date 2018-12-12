@@ -7,15 +7,18 @@ __pycache__/
 # Log Files
 *.log
 
+# .DS_Store
+*.DS_Store
+
 # Idea
 *.iml
-.idea/workspace.xml
-.idea/tasks.xml
-.idea/gradle.xml
-.idea/assetWizardSettings.xml
-.idea/dictionaries
-.idea/libraries
-.idea/caches
+*/.idea/workspace.xml
+*/.idea/tasks.xml
+*/.idea/gradle.xml
+*/.idea/assetWizardSettings.xml
+*/.idea/dictionaries
+*/.idea/libraries
+*/.idea/caches
 
 # ipynb files
 .ipynb_checkpoints
