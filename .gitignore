@@ -19,6 +19,9 @@ __pycache__/
 */.idea/dictionaries
 */.idea/libraries
 */.idea/caches
+*/.idea/modules.xml
+*/.idea/misc.xml
+
 
 # ipynb files
 .ipynb_checkpoints
