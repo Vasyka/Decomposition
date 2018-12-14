@@ -6,6 +6,7 @@ import re
 import os
 import openpyxl
 
+# Отключаем warnings
 warnings.simplefilter("ignore")
 
 
@@ -15,24 +16,33 @@ class Decomposition(object):
 
     Пользовательские методы:
     ------------------------
-    - load_merged_data(**path_and_sheetnames) - чтение данных, для объединенных таблиц отечественного выпуска и импорта
-    - load_separated_data(**path_and_sheetnames) - чтение данных, для разделенных таблиц отечественного выпуска и
-    импорта
+    - load_WIOD2013_merged_data(**path_and_sheetnames) - чтение данных из таблиц WIOD release 2013. Таблицы
+    отечественного выпуска и импорта находятся на одной странице, данные за разные годы лежат в одном файле.
+    - load_Rosstat_separated_data(**path_and_sheetnames) - чтение данных из таблиц Росстата. Таблицы отечественного
+    выпуска и импорта находятся на разных страницах, данные за разные годы лежат в разных файлах.
     - prepare_data(column_order) - подготовка данных перед декомпозицией
-    - decomposition_2016() - декомпозиция из статьи в "Вопросах статистики" 2016 год по 2м факторам.
-    - decomposition_2018() - декомпозиция по статье "Методологические проблемы использования метода структурной
+
+    Методы декомпозиции:
+    --------------------
+    - decomposition_Baranov_2016() - декомпозиция из статьи в "Вопросах статистики" 2016 год по 2м факторам.
+    - decomposition_Baranov_2018() - декомпозиция по статье "Методологические проблемы использования метода структурной
     декомпозиции в модели "затраты – выпуск" на современном этапе" (2018) - по 6 факторам - промежуточный спрос,
     внешний спрос, спрос домашних хозяйств, спрос государства, валовое накопление основного капитала,
     изменение материальных оборотных средств
+    - decomposition_Magacho_2018() - декомпозиция из статьи Magacho, G.R., et al., "Impacts of trade liberalization
+    on countries’ sectoral structure of production and trade: A structural decomposition analysis." Structural Change
+    and Economics Dynamics (2018)
 
-    Служебные методы:
-    -----------------
+    Методы используемые для внутренних операций:
+    --------------------------------------------
     - get_by_name(name) - возвращает столбец по номеру столбца с конца из матриц обоих годов для отечественной
     продукции и импорта
     - get_table(df) - возвращает матрицы затрат на покупку продуктов одних отраслей для производства продуктов других
     отраслей
     - check_sums_equality(self, Z, F, Total) - проверяет правильность полученной таблицы X или M с точностью до 10^-8
     - save_to_excel(self, file_name, rounding="%.3f", **tables) - сохраняет полученные таблицы в выбранный excel-файл
+    - pack_name(str) - приклеивает к строке годы, к которым относится содержание строки, и если было указано, то год,
+    для которого были пересчитаны цены в таблице
 
     """
 
@@ -42,11 +52,10 @@ class Decomposition(object):
         self.df_d = []  # таблицы отечественного выпуска
         self.df_m = []  # таблицы импорта
 
-    def load_merged_data(self, **path_and_sheetnames):
+    def load_WIOD2013_merged_data(self, **path_and_sheetnames):
         """
-        Загружает данные из excel-файла с выбранных страниц.
-        Для файлов, в которых таблицы отечественного выпуска и
-        импорта находятся на одной странице.
+        Чтение данных из таблиц WIOD release 2013. Таблицы отечественного выпуска и импорта находятся на одной
+        странице, данные за разные годы лежат в одном файле.
 
         Parameters
         ----------
@@ -54,6 +63,16 @@ class Decomposition(object):
             путь к excel-файлу и страницы в excel-файле
 
         """
+
+        # Расположение таблицы и столбцов\строк с названиями в ней
+        vertical_table_position = slice(5, 75)  # положение и размеры таблицы по вертикали
+        horizontal_table_position = slice(4, 46)  # положение и размеры таблицы по горизонтали
+        industries_part_position = slice(4, 39)  # положение и размеры части таблицы с промежуточным потреблением по
+        # горизонтали
+        codes_position = 1  # номер строки в таблице с кодами отраслей
+        columns_names_position = 2  # номер строки в таблице с названиями колонок
+        rows_names_position = 1  # номер столбца в таблице с названиями строк
+
 
         df_all = []
         for path, sheetnames in path_and_sheetnames.items():
@@ -62,33 +81,34 @@ class Decomposition(object):
                 df1 = pd.read_excel(file, sheet_name=sheetname)
 
                 # Получаем имена столбцов и строк
-                idx = df1.iloc[5:75, 1]
-                idx.name = ""
-                cols = df1.iloc[2, 4:46]
-                cols.name = df1.columns[0]
-                self.codes = df1.iloc[1, 4:39]
+                rows = df1.iloc[vertical_table_position, rows_names_position]
+                rows.name = ""
+                columns = df1.iloc[columns_names_position, horizontal_table_position]
+                columns.name = df1.columns[0]
 
-                # Сохраняем отформатированную версию
-                df = df1.iloc[5:75, 4:46]
-                df.columns = cols
-                df.index = idx
-                df.name = cols.name
+                # Получаем из таблицы коды отраслей (одинаковые по вертикали и горизонтали)
+                self.codes = df1.iloc[codes_position, industries_part_position]
+
+                # Сохраняем обрезанную версию таблицы
+                df = df1.iloc[vertical_table_position, horizontal_table_position]
+                df.columns = columns
+                df.index = rows
+                df.name = columns.name
 
                 df_all.append(df)
-                self.years.append(re.search("\d+", cols.name).group(0))
+                self.years.append(re.search("\d+", columns.name).group(0))
 
-            print("Обрабатываем данные из таблицы \"" + cols.name + "\"")
+            print("Обрабатываем данные из таблицы \"" + columns.name + "\"")
             self.prices_in = "(в ценах " + re.search("\d+", df1.iloc[0, 0]).group(0) + "года)"
 
             # Делим таблицы на отечественный выпуск и импорт
             self.df_d = [df_all[0].iloc[:35], df_all[1].iloc[:35]]
             self.df_m = [df_all[0].iloc[35:], df_all[1].iloc[35:]]
 
-    def load_separated_data(self, **path_and_sheetnames):
+    def load_Rosstat_separated_data(self, **path_and_sheetnames):
         """
-        Загружает данные из excel-файла с выбранных страниц.
-        Для файлов, в которых таблицы отечественного выпуска и
-        импорта расположены на разных страницах excel-файла.
+        Чтение данных из таблиц Росстата. Таблицы отечественного выпуска и импорта находятся на разных страницах,
+        данные за разные годы лежат в разных файлах.
 
         Parameters
         ----------
@@ -97,24 +117,35 @@ class Decomposition(object):
 
         """
 
+        # Расположение таблицы и столбцов\строк с названиями в ней
+        vertical_table_position = slice(3, 62)  # положение и размеры таблицы по вертикали
+        horizontal_table_position = slice(3, 69)  # положение и размеры таблицы по горизонтали
+        industries_part_position = slice(3, 62)  # положение и размеры части таблицы с промежуточным потреблением по
+        # горизонтали
+        codes_position = 1  # номер строки в таблице с кодами отраслей
+        columns_names_position = 0  # номер строки в таблице с названиями колонок
+        rows_names_position = 2  # номер столбца в таблице с названиями строк
+
+
         for path, sheetnames in path_and_sheetnames.items():
             file = pd.ExcelFile(path)
             for i, sheetname in enumerate(sheetnames):
                 df1 = pd.read_excel(file, sheet_name=sheetname)
 
                 # Получаем имена столбцов и строк
-                idx = df1.iloc[3:62, 2]
-                idx.name = ""
-                cols = df1.iloc[0, 3:69]
-                cols.name = df1.columns[0]
+                rows = df1.iloc[vertical_table_position, rows_names_position]
+                rows.name = ""
+                columns = df1.iloc[columns_names_position, horizontal_table_position]
+                columns.name = df1.columns[0]
 
-                self.codes = df1.iloc[1, 3:62]
+                # Получаем из таблицы коды отраслей (одинаковые по вертикали и горизонтали)
+                self.codes = df1.iloc[codes_position, industries_part_position]
 
-                # Сохраняем отформатированную версию
-                df = df1.iloc[3:62, 3:69]
-                df.columns = cols
-                df.index = idx
-                df.name = cols.name
+                # Сохраняем обрезанную версию таблицы
+                df = df1.iloc[vertical_table_position, horizontal_table_position]
+                df.columns = columns
+                df.index = rows
+                df.name = columns.name
 
                 # Делим таблицы на отечественный выпуск и импорт
                 if not i:
@@ -122,8 +153,8 @@ class Decomposition(object):
                 else:
                     self.df_m.append(df)
 
-            print("Обрабатываем данные из таблицы \"" + cols.name + "\"")
-            self.years.append(re.search("\d+", cols.name).group(0))
+            print("Обрабатываем данные из таблицы \"" + columns.name + "\"")
+            self.years.append(re.search("\d+", columns.name).group(0))
 
     def get_by_pos(self, pos):
         """
@@ -142,7 +173,8 @@ class Decomposition(object):
 
     def pack_name(self, str):
         """
-        Добавляет к строке-названию таблицы год таблцы, для какого года перечитаны цены
+        Приклеивает к строке годы, к которым относится содержание строки, и если было указано, то год, для которого были
+        пересчитаны цены в таблице
 
         str: string
             строка-название таблицы\страницы файла
@@ -215,7 +247,7 @@ class Decomposition(object):
         I = np.eye(np.size(self.X[0]), dtype='float')
         self.L_d = [np.linalg.inv(((I - A).astype('float'))) for A in self.A_d]
 
-    def decomposition_2016(self):
+    def decomposition_Baranov_2016(self):
         """
         Метод декомпозиции из статьи в "Вопросах статистики" 2016 год. Декомпозиция по 2м факторам.
 
@@ -253,6 +285,8 @@ class Decomposition(object):
                                               sum(self.M[0]), sum(self.M[1]), (sum(self.M[1]) / sum(self.M[0])) * 100]
         self.results_percents.columns.name = 'Изменения в выпуске и импорте'
 
+        # Проверяем, что изменения в валовом выпуске, полученные как сумма факторов (dX и dM) сходятся с разностями
+        # X[1] - X[0] и M[1] - M[0], полученными из таблиц (с точностью до 10^-5)
         assert (sum(self.X[1]) - sum(self.X[0]) - sum(
             dX) < 1e-5), "Oops! Полученные суммарные изменения в валовом выпуске dX не равны X1 - X0!"
         assert (sum(self.M[1]) - sum(self.M[0]) - sum(
@@ -260,11 +294,11 @@ class Decomposition(object):
 
         result_tables = {
             "Упрощенная декомпозиция изменений в выпуске и импорте за " + self.my_years + "гг " + self.prices_in: results}
-        self.save_to_excel('results_simple(dec2016)_' + self.my_years + '.xlsx', **result_tables)
+        self.save_to_excel('results_simple(Baranov_2016).xlsx', **result_tables)
 
-        print("\nРезультат работы метода decomposition_2016 сохранен в папку results!")
+        print("\nРезультат работы метода декомпозиции Baranov_2016 сохранен в папку results!")
 
-    def decomposition_2018(self):
+    def decomposition_Baranov_2018(self):
         """
         Метод декомпозиции из статьи "Методологические проблемы использования метода структурной декомпозиции
         в модели "затраты – выпуск" на современном этапе" (2018).
@@ -274,16 +308,16 @@ class Decomposition(object):
 
         """
         # Колонки для результирующих таблиц
-        cols_X = ['Конечный спрос через формулу для декомпозиции 16 года',
+        columns_X = ['Конечный спрос через формулу для декомпозиции 16 года',
                   'Конечный спрос как сумма факторов', 'dX полученный с помощью метода декомпозиции',
                   'Разность X1 - X0']
-        cols_M = ['Конечный спрос через формулу для декомпозиции 16 года',
+        columns_M = ['Конечный спрос через формулу для декомпозиции 16 года',
                   'Конечный спрос как сумма факторов', 'dM полученный с помощью метода декомпозиции',
                   'Разность M1 - M0']
-        res_cols = ['Промежуточный спрос', 'Внешний спрос', 'Спрос домашних хозяйств', 'Спрос государства',
+        res_columns = ['Промежуточный спрос', 'Внешний спрос', 'Спрос домашних хозяйств', 'Спрос государства',
                     'Валовое накопление основного капитала', 'Изменение запаса материальных оборотных средств']
         res_index = ['Выпуск отечественной продукции', 'Импорт', 'Всего']
-        res_cols_perc = ['Промежуточный спрос, %', 'Внешний спрос, %', 'Спрос домашних хозяйств, %',
+        res_columns_perc = ['Промежуточный спрос, %', 'Внешний спрос, %', 'Спрос домашних хозяйств, %',
                          'Спрос государства, %', 'Валовое накопление основного капитала, %',
                          'Изменение запаса материальных оборотных средств, %']
 
@@ -322,17 +356,24 @@ class Decomposition(object):
         dM[7] = ((self.A_m[1].dot(self.L_d[1]) + self.A_m[0].dot(self.L_d[0])).dot(self.F_d[1] - self.F_d[0])) / 2 + (
             self.F_m[1] - self.F_m[0])
 
+        # Проверяем, что изменения в валовом выпуске, полученные как сумма факторов (dX_all и dM_all) сходятся с
+        # разностями X[1] - X[0] и M[1] - M[0], полученными из таблиц (с точностью до 10^-5)
+        assert (sum(self.X[1]) - sum(self.X[0]) - sum(
+            dX_all) < 1e-5), "Oops! Полученные суммарные изменения в валовом выпуске dX_all не равны X1 - X0!"
+        assert (sum(self.M[1]) - sum(self.M[0]) - sum(
+            dM_all) < 1e-5), "Oops! Полученные суммарные изменения в валовом выпуске dM_all не равны M1 - M0!"
+
         # Вывод таблиц
-        result_d = pd.DataFrame(np.column_stack(dX[:6]), columns=res_cols, index=self.df_d[0].index)
+        result_d = pd.DataFrame(np.column_stack(dX[:6]), columns=res_columns, index=self.df_d[0].index)
         result_d.columns.name = 'Выпуск отечественной продукции'
-        result_m = pd.DataFrame(np.column_stack(dM[:6]), columns=res_cols, index=self.df_d[0].index)
+        result_m = pd.DataFrame(np.column_stack(dM[:6]), columns=res_columns, index=self.df_d[0].index)
         result_m.columns.name = 'Импорт'
 
         res_check_X = pd.DataFrame(np.column_stack([dX[7], dX[6], dX_all, self.X[1] - self.X[0]]),
-                                   columns=cols_X, index=self.df_d[0].index)
+                                   columns=columns_X, index=self.df_d[0].index)
         res_check_X.columns.name = 'Выпуск отечественной продукци'
         res_check_M = pd.DataFrame(np.column_stack([dM[7], dM[6], dM_all, self.M[1] - self.M[0]]),
-                                   columns=cols_M, index=self.df_d[0].index)
+                                   columns=columns_M, index=self.df_d[0].index)
         res_check_M.columns.name = 'Импорт'
 
         # Вывод таблиц в процентах - таблицы аналогичные полученным в "Вопросах статистики"
@@ -353,11 +394,11 @@ class Decomposition(object):
         res_perc2.columns.name = "Изменение конечного спроса"
 
         results_perc_d = pd.DataFrame(np.column_stack(dX[:6] / abs(dX_all) * 100), index=self.df_d[0].index,
-                                      columns=res_cols)
+                                      columns=res_columns)
         results_perc_d.columns.name = 'Изменение отечественого выпуска'
 
         results_perc_m = pd.DataFrame(np.column_stack(dM[:6] / abs(dM_all) * 100), index=self.df_d[0].index,
-                                      columns=res_cols)
+                                      columns=res_columns)
         results_perc_m.columns.name = 'Изменение импорта'
 
         # res_perc.loc['Private Households with Employed Persons'] = [0, 100]
@@ -384,12 +425,12 @@ class Decomposition(object):
         results_perc_d.loc['Total'] = np.round(sumss_d / abs(sum(dX_all)) * 100, 1)
         results_perc_m.loc['Total'] = np.round(sumss_m / abs(sum(dM_all)) * 100, 1)
 
-        results = pd.DataFrame([sumss_d, sumss_m, sumss], index=res_index, columns=res_cols)
+        results = pd.DataFrame([sumss_d, sumss_m, sumss], index=res_index, columns=res_columns)
         results.columns.name = 'Изменение выпуска за ' + self.years[0] + "-" + self.years[1]
 
         results_perc = pd.DataFrame(
             [sumss_d / abs(sum(sumss_d)) * 100, sumss_m / abs(sum(sumss_m)) * 100, sumss / abs(sum(sumss)) * 100],
-            index=res_index, columns=res_cols_perc)
+            index=res_index, columns=res_columns_perc)
         results_perc.columns.name = 'Изменение выпуска за ' + self.years[0] + "-" + self.years[1]
 
 
@@ -419,13 +460,80 @@ class Decomposition(object):
         checking_tables = {'Выпуск отечественной продукци за ' + self.my_years + 'гг ' + self.prices_in: res_check_X,
                            'Импорт за ' + self.my_years + 'гг ' + self.prices_in: res_check_M}
 
-        self.save_to_excel('results_in_percents(decomposition_18)_' + self.my_years + '.xlsx',
-                         **percented_result_tables)
-        self.save_to_excel('changes_in_percents_' + self.my_years + '.xlsx', **percented_tables)
-        self.save_to_excel('results(decomposition_18)_' + self.my_years + '.xlsx', **result_tables)
-        self.save_to_excel('для_проверки_2018_' + self.my_years + '.xlsx', **checking_tables)
+        self.save_to_excel('results_in_percents(Baranov_2018).xlsx',
+                           **percented_result_tables)
+        self.save_to_excel('changes_in_percents.xlsx', **percented_tables)
+        self.save_to_excel('results(Baranov_2018).xlsx', **result_tables)
+        self.save_to_excel('для_проверки_(Baranov_2018).xlsx', **checking_tables)
 
-        print("Результат работы метода decomposition_2018 сохранен в папку results!\n")
+        print("Результат работы метода декомпозиции Baranov_2018 сохранен в папку results!\n")
+
+    def decomposition_Magacho_2018(self):
+        """
+        Метод декомпозиции из статьи Magacho, G.R., et al., "Impacts of trade liberalization on countries’ sectoral
+        structure of production and trade: A structural decomposition analysis." Structural Change and Economics
+        Dynamics (2018)
+
+        Декомпозиция по 3 факторам - технологические изменения, замещение национальных продуктов
+        импортированными(?), конечный спрос
+
+        """
+        # Колонки для результирующих таблиц
+        res_columns = ['Технологические изменения', 'Замещение отечественных продуктов импортированными',
+                       'Конечный спрос(включая экспорт)', 'Экспорт', 'dX полученный с помощью метода декомпозиции',
+                       'Разность X1 - X0']
+
+        dA = self.A_m[1] + self.A_d[1] - self.A_m[0] - self.A_d[0]
+        sumF = self.F_d[1] + self.F_d[0]
+
+        # Получаем слагаемые декомпозиции изменения выпуска отечественной продукции
+        technological_change = (self.L_d[1].dot(dA)).dot(self.L_d[0]).dot(sumF) / 2
+        substitution_national_inputs = (self.L_d[1].dot(self.A_m[0] - self.A_m[1])).dot(self.L_d[0]).dot(sumF) / 2
+        final_demands = (self.L_d[1] + self.L_d[0]).dot(self.F_d[1] - self.F_d[0]) / 2
+        export = (self.L_d[1] + self.L_d[0]).dot(self.E[1] - self.E[0]) / 2
+        dX = technological_change + substitution_national_inputs + final_demands
+
+        dX[dX == 0] = 1e-20
+
+        #dX_perc = (self.X[1] / self.X[0]) * 100
+
+        # Проверяем, что изменения в валовом выпуске, полученные как сумма факторов (dX) сходятся с разностью
+        # X[1] - X[0], полученной из таблиц (с точностью до 10^-5)
+        assert (sum(self.X[1]) - sum(self.X[0]) - sum(dX) < 1e-5), \
+            "Oops! Полученные суммарные изменения в валовом выпуске dX не равны X1 - X0!"
+
+        # Заполняем таблицы
+        results = pd.DataFrame(np.column_stack([technological_change, substitution_national_inputs,
+                                                       final_demands, export,
+                                                dX, self.X[1] - self.X[0]]), index=self.df_d[0].index,
+                               columns= res_columns)
+        results.columns.name = 'Выпуск отечественной продукции'
+
+
+        results_percented = pd.DataFrame(np.column_stack([technological_change / abs(dX) * 100,
+                                                        substitution_national_inputs / abs(dX) * 100,
+                                                        final_demands / abs(dX) * 100, export / abs(dX) * 100]),
+                                         index=self.df_d[0].index,
+                               columns=res_columns[:-2])
+        results_percented.columns.name = 'Выпуск отечественной продукции'
+
+
+        results.loc["Total"] = [sum(technological_change), sum(substitution_national_inputs), sum(final_demands),
+                                sum(export), sum(dX), sum(self.X[1]) - sum(self.X[0])]
+        results_percented.loc["Total"] = [sum(technological_change) / abs(sum(dX)) * 100,
+                                          sum(substitution_national_inputs) / abs(sum(dX)) * 100,
+                                         sum(final_demands) / abs(sum(dX)) * 100,
+                                          sum(export) / abs(sum(dX)) * 100]
+
+
+
+        # Присваиваем имена таблицам и сохраняем в excel
+        result_tables = {self.pack_name('Выпуск отечественной продукции'): results}
+        result_percented_tables = {self.pack_name('Выпуск отечественной продукции'): results_percented}
+        self.save_to_excel('results(Magacho_2018).xlsx', **result_tables)
+        self.save_to_excel('results_in_percents(Magacho_2018).xlsx', **result_percented_tables)
+
+        print("Результат работы метода декомпозиции Magacho_2018 сохранен в папку results!\n")
 
     def save_to_excel(self, file_name, rounding="%.3f", **tables):
         """
@@ -492,28 +600,30 @@ class Decomposition(object):
 dec = Decomposition()
 
 path_and_sheetnames = {"./data/задание 1 для студентов.xlsx": [0, 1]}
-dec.load_merged_data(**path_and_sheetnames)
+dec.load_WIOD2013_merged_data(**path_and_sheetnames)
 dec.prepare_data(column_order='eng')
 
-dec.decomposition_2016()
-dec.decomposition_2018()
+dec.decomposition_Baranov_2016()
+dec.decomposition_Baranov_2018()
+dec.decomposition_Magacho_2018()
 
 dec = Decomposition()
 path_and_sheetnames = {"./data/all2011.xlsx": ['SD calculated def', 'SM calculated def'],
                        "./data/all2014 (проверочная).xlsx": ['SD calculated def', 'SM calculated def']}
-dec.load_separated_data(**path_and_sheetnames)
+dec.load_Rosstat_separated_data(**path_and_sheetnames)
 dec.prepare_data(column_order='rus')
 
-dec.decomposition_2016()
-dec.decomposition_2018()
+dec.decomposition_Baranov_2016()
+dec.decomposition_Baranov_2018()
+dec.decomposition_Magacho_2018()
 
 
 dec = Decomposition()
 path_and_sheetnames = {"./data/all2014 (проверочная).xlsx": ['SD calculated def', 'SM calculated def'],
                        "./data/all2015 (проверочная).xlsx": ['SD calculated def', 'SM calculated def']}
-dec.load_separated_data(**path_and_sheetnames)
+dec.load_Rosstat_separated_data(**path_and_sheetnames)
 dec.prepare_data(column_order='rus')
 
-dec.decomposition_2016()
-dec.decomposition_2018()
-
+dec.decomposition_Baranov_2016()
+dec.decomposition_Baranov_2018()
+dec.decomposition_Magacho_2018()
