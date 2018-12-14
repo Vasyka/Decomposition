@@ -31,7 +31,8 @@ class Decomposition(object):
     изменение материальных оборотных средств
     - decomposition_Magacho_2018() - декомпозиция из статьи Magacho, G.R., et al., "Impacts of trade liberalization
     on countries’ sectoral structure of production and trade: A structural decomposition analysis." Structural Change
-    and Economics Dynamics (2018)
+    and Economics Dynamics (2018) - по 4 факторам - технологические изменения, импортозамещение, конечный спрос, экспорт(формула 15).
+    Также раскладываем суммарный экспорт на directed и indirirected.
 
     Методы используемые для внутренних операций:
     --------------------------------------------
@@ -64,7 +65,7 @@ class Decomposition(object):
 
         """
 
-        # Расположение таблицы и столбцов\строк с названиями в ней
+        # Расположение 1ого квадранта таблицы и столбцов\строк с названиями в ней
         vertical_table_position = slice(5, 75)  # положение и размеры таблицы по вертикали
         horizontal_table_position = slice(4, 46)  # положение и размеры таблицы по горизонтали
         industries_part_position = slice(4, 39)  # положение и размеры части таблицы с промежуточным потреблением по
@@ -222,6 +223,7 @@ class Decomposition(object):
 
         Z_m = list(map(self.get_table, self.df_m))
         Z_d = list(map(self.get_table, self.df_d))
+
 
         self.X[self.X == 0] = 1e-20
         self.M[self.M == 0] = 1e-20
@@ -474,14 +476,19 @@ class Decomposition(object):
         structure of production and trade: A structural decomposition analysis." Structural Change and Economics
         Dynamics (2018)
 
-        Декомпозиция по 3 факторам - технологические изменения, замещение национальных продуктов
-        импортированными(?), конечный спрос
+        Декомпозиция по 4 факторам - технологические изменения, импортозамещение, конечный спрос, экспорт(формула 15).
+        Также раскладываем суммарный экспорт на directed и indirirected.
 
         """
         # Колонки для результирующих таблиц
-        res_columns = ['Технологические изменения', 'Замещение отечественных продуктов импортированными',
-                       'Конечный спрос(включая экспорт)', 'Экспорт', 'dX полученный с помощью метода декомпозиции',
-                       'Разность X1 - X0']
+        res_columns = ['Технологические изменения', 'Импортозамещение','Конечный спрос(включая экспорт)',
+                       'Экспорт косвенный', 'Экспорт прямой', 'Экспорт суммарный',
+                       'dX полученный с помощью метода декомпозиции', 'Разность X1 - X0']
+
+        res_percented_columns = ['Технологические изменения, %', 'Импортозамещение, %',
+                       'Конечный спрос(включая экспорт), %', 'Экспорт косвенный, %', 'Экспорт  прямой, %',
+                       'Экспорт суммарный, %']
+
 
         dA = self.A_m[1] + self.A_d[1] - self.A_m[0] - self.A_d[0]
         sumF = self.F_d[1] + self.F_d[0]
@@ -490,40 +497,45 @@ class Decomposition(object):
         technological_change = (self.L_d[1].dot(dA)).dot(self.L_d[0]).dot(sumF) / 2
         substitution_national_inputs = (self.L_d[1].dot(self.A_m[0] - self.A_m[1])).dot(self.L_d[0]).dot(sumF) / 2
         final_demands = (self.L_d[1] + self.L_d[0]).dot(self.F_d[1] - self.F_d[0]) / 2
-        export = (self.L_d[1] + self.L_d[0]).dot(self.E[1] - self.E[0]) / 2
+
+        export = self.E[1] - self.E[0]
+        export_total = (self.L_d[1] + self.L_d[0]).dot(export) / 2
+        export_ind = export_total - export
+
         dX = technological_change + substitution_national_inputs + final_demands
-
         dX[dX == 0] = 1e-20
-
-        #dX_perc = (self.X[1] / self.X[0]) * 100
 
         # Проверяем, что изменения в валовом выпуске, полученные как сумма факторов (dX) сходятся с разностью
         # X[1] - X[0], полученной из таблиц (с точностью до 10^-5)
         assert (sum(self.X[1]) - sum(self.X[0]) - sum(dX) < 1e-5), \
             "Oops! Полученные суммарные изменения в валовом выпуске dX не равны X1 - X0!"
 
+
         # Заполняем таблицы
         results = pd.DataFrame(np.column_stack([technological_change, substitution_national_inputs,
-                                                       final_demands, export,
-                                                dX, self.X[1] - self.X[0]]), index=self.df_d[0].index,
-                               columns= res_columns)
+                                         final_demands, export_ind, export, export_total, dX,
+                                                self.X[1] - self.X[0]]), index=self.df_d[0].index,
+                               columns=res_columns)
+
         results.columns.name = 'Выпуск отечественной продукции'
 
 
         results_percented = pd.DataFrame(np.column_stack([technological_change / abs(dX) * 100,
                                                         substitution_national_inputs / abs(dX) * 100,
-                                                        final_demands / abs(dX) * 100, export / abs(dX) * 100]),
-                                         index=self.df_d[0].index,
-                               columns=res_columns[:-2])
+                                                        final_demands / abs(dX) * 100, export_ind / abs(dX) * 100,
+                                                        export / abs(dX) * 100, export_total / abs(dX) * 100]),
+                                         index=self.df_d[0].index,columns=res_percented_columns)
         results_percented.columns.name = 'Выпуск отечественной продукции'
 
 
         results.loc["Total"] = [sum(technological_change), sum(substitution_national_inputs), sum(final_demands),
-                                sum(export), sum(dX), sum(self.X[1]) - sum(self.X[0])]
+                            sum(export_ind), sum(export), sum(export_total), sum(dX), sum(self.X[1]) - sum(self.X[0])]
         results_percented.loc["Total"] = [sum(technological_change) / abs(sum(dX)) * 100,
                                           sum(substitution_national_inputs) / abs(sum(dX)) * 100,
                                          sum(final_demands) / abs(sum(dX)) * 100,
-                                          sum(export) / abs(sum(dX)) * 100]
+                                          sum(export_ind) / abs(sum(dX)) * 100,
+                                          sum(export) / abs(sum(dX)) * 100,
+                                          sum(export_total) / abs(sum(dX)) * 100]
 
 
 
@@ -593,37 +605,3 @@ class Decomposition(object):
 
         writer.save()
         workbook.close()
-
-
-
-
-dec = Decomposition()
-
-path_and_sheetnames = {"./data/задание 1 для студентов.xlsx": [0, 1]}
-dec.load_WIOD2013_merged_data(**path_and_sheetnames)
-dec.prepare_data(column_order='eng')
-
-dec.decomposition_Baranov_2016()
-dec.decomposition_Baranov_2018()
-dec.decomposition_Magacho_2018()
-
-dec = Decomposition()
-path_and_sheetnames = {"./data/all2011.xlsx": ['SD calculated def', 'SM calculated def'],
-                       "./data/all2014 (проверочная).xlsx": ['SD calculated def', 'SM calculated def']}
-dec.load_Rosstat_separated_data(**path_and_sheetnames)
-dec.prepare_data(column_order='rus')
-
-dec.decomposition_Baranov_2016()
-dec.decomposition_Baranov_2018()
-dec.decomposition_Magacho_2018()
-
-
-dec = Decomposition()
-path_and_sheetnames = {"./data/all2014 (проверочная).xlsx": ['SD calculated def', 'SM calculated def'],
-                       "./data/all2015 (проверочная).xlsx": ['SD calculated def', 'SM calculated def']}
-dec.load_Rosstat_separated_data(**path_and_sheetnames)
-dec.prepare_data(column_order='rus')
-
-dec.decomposition_Baranov_2016()
-dec.decomposition_Baranov_2018()
-dec.decomposition_Magacho_2018()
