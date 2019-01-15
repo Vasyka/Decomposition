@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
-import operator
+from operator import add
 import warnings
 import re
 import os
 import openpyxl
+
 
 # Отключаем warnings
 warnings.simplefilter("ignore")
@@ -33,6 +34,7 @@ class Decomposition(object):
     on countries’ sectoral structure of production and trade: A structural decomposition analysis." Structural Change
     and Economics Dynamics (2018) - по 4 факторам - технологические изменения, импортозамещение, конечный спрос, экспорт(формула 15).
     Также раскладываем суммарный экспорт на directed и indirirected.
+    - decomposition_Chenery() - декомпозиция Chenery
 
     Методы используемые для внутренних операций:
     --------------------------------------------
@@ -40,11 +42,12 @@ class Decomposition(object):
     продукции и импорта
     - get_table(df) - возвращает матрицы затрат на покупку продуктов одних отраслей для производства продуктов других
     отраслей
-    - check_sums_equality(self, Z, F, Total) - проверяет правильность полученной таблицы X или M с точностью до 10^-8
-    - save_to_excel(self, file_name, rounding="%.3f", **tables) - сохраняет полученные таблицы в выбранный excel-файл
+    - check_sums_equality(Z, F, Total) - проверяет правильность полученной таблицы X или M с точностью до 10^-8
+    - save_to_excel(file_name, rounding="%.3f", **tables) - сохраняет полученные таблицы в выбранный excel-файл
     - pack_name(str) - приклеивает к строке годы, к которым относится содержание строки, и если было указано, то год,
     для которого были пересчитаны цены в таблице
-
+    - add_percent_to_column_name(str) - добавляет знак процента для названий колонок таблиц.
+    - divide_or_put_zero(X,Y) - производит деление вектора X на Y, если Y != 0, остальное заполняет нулями.
     """
 
     def __init__(self):
@@ -52,6 +55,7 @@ class Decomposition(object):
         self.years = []  # годы за которые приведены таблицы
         self.df_d = []  # таблицы отечественного выпуска
         self.df_m = []  # таблицы импорта
+        self.eps0 = 1e-20  # число на которое заменяем нули
 
     def load_WIOD2013_merged_data(self, **path_and_sheetnames):
         """
@@ -149,7 +153,7 @@ class Decomposition(object):
                 df.name = columns.name
 
                 # Делим таблицы на отечественный выпуск и импорт
-                if not i:
+                if i == 1:
                     self.df_d.append(df)
                 else:
                     self.df_m.append(df)
@@ -197,6 +201,22 @@ class Decomposition(object):
                     Total[year][i] = sum(z.iloc[i]) + f[i]
         return Total
 
+    def divide_or_put_zero(self,X,Y):
+        """
+        Производит деление вектора X на Y, если Y != 0, остальное заполняет нулями.
+        """
+        res = np.zeros_like(X)
+        mask = Y != 0.
+        res[mask] = X[mask] / Y[mask]
+        return res
+
+    def add_percent_to_column_name(self,s):
+        """
+        Добавляет знак процента для названий колонок таблиц.
+        """
+        return s + ", %"
+
+
     def prepare_data(self, column_order):
         """
         Подготовка данных перед декомпозицией
@@ -206,6 +226,9 @@ class Decomposition(object):
         """
         self.columns = self.df_d[0].columns.values
         self.my_years = self.years[0] + "-" + self.years[1]
+        length = len(self.columns) - 7
+        I = np.eye(length, dtype='float')
+        U = np.ones((length,length))
         os.makedirs("./results/" + self.my_years, exist_ok=True)
 
         if column_order == 'eng':
@@ -224,9 +247,9 @@ class Decomposition(object):
         Z_m = list(map(self.get_table, self.df_m))
         Z_d = list(map(self.get_table, self.df_d))
 
-
-        self.X[self.X == 0] = 1e-20
-        self.M[self.M == 0] = 1e-20
+        # Заменяем нули на выбранный eps0
+        self.X[self.X == 0] = self.eps0
+        self.M[self.M == 0] = self.eps0
 
         # Вычисляем суммы столбцов таблицы
         self.I_m = self.I_mgfch + self.I_ms
@@ -238,16 +261,49 @@ class Decomposition(object):
         self.F_m = self.I_m + self.C_m + self.E_r
         self.F_d = self.I_d + self.C_d + self.E
 
+        # Получаем суммарные показатели для импорта и отечественной продукции
+        self.I_s = self.I_ds + self.I_ms
+        self.I_gfch = self.I_dgfch + self.I_mgfch
+        self.I = self.I_d + self.I_m
+        self.C_g = self.C_dg + self.C_mg
+        self.C_h = self.C_dh + self.C_mh
+        self.C = self.C_d + self.C_m
+
         # Проверяем правильность столбцов суммарного выпуска
         self.M = self.check_sums_equality(Z_m, self.F_m, self.M)
         self.X = self.check_sums_equality(Z_d, self.F_d, self.X)
 
+
+
+        # TODO: Переписать для pandas dataframe
         # Вычисляем матрицы технических коэффициентов
         self.A_d = [(Z_d[0] / self.X[0]).astype('float'), (Z_d[1] / self.X[1]).astype('float')]
         self.A_m = [Z_m[0] / self.X[0], Z_m[1] / self.X[1]]
+        self.A = [(self.A_d[0] + self.A_m[0]).astype('float'), (self.A_d[1] + self.A_m[1]).astype('float')]
+        self.L_d = [np.linalg.inv(I - A) for A in self.A_d]
 
-        I = np.eye(np.size(self.X[0]), dtype='float')
-        self.L_d = [np.linalg.inv(((I - A).astype('float'))) for A in self.A_d]
+        #print(self.L_d)
+
+        # Доли отечественной\импортной составляющей в общих технологических коэффициентах
+        self.R_d = [self.A_d[0] / self.A[0], self.A_d[1] / self.A[1]]
+        self.R_d[0][self.A[0] == 0] = 0
+        self.R_d[1][self.A[1] == 0] = 0
+        self.R_m = [U - self.R_d[0], U - self.R_d[1]]
+
+        # Доля отечественной составляющей в общем ивестиционном спросе
+        self.R_In = self.divide_or_put_zero(self.I_d,self.I)
+        self.R_Is = self.divide_or_put_zero(self.I_ds, self.I_s)
+        self.R_Igfch = self.divide_or_put_zero(self.I_dgfch, self.I_gfch)
+        # self.R_In = np.zeros()...
+
+        # Доля отечественной составляющей в общем потребительском спросе
+        self.R_C = self.divide_or_put_zero(self.C_d, self.C)
+        self.R_Cg = self.divide_or_put_zero(self.C_dg, self.C_g)
+        self.R_Ch = self.divide_or_put_zero(self.C_dh, self.C_h)
+
+
+
+
 
     def decomposition_Baranov_2016(self):
         """
@@ -261,8 +317,9 @@ class Decomposition(object):
                         'Импорт ' + self.years[0] + ' года, млн', 'Импорт ' + self.years[1] + ' года, млн',
                         'Импорт ' + self.years[1] + ' года к ' + self.years[0] + ' году, %']
 
-        WL0 = self.A_m[0].dot(self.L_d[0])
+        WL0 = (self.A_m[0]).dot(self.L_d[0])
         WL1 = self.A_m[1].dot(self.L_d[1])
+
 
         dX = ((self.L_d[1] + self.L_d[0]).dot(self.F_d[1] - self.F_d[0]) + (self.L_d[1] - self.L_d[0]).dot(
             self.F_d[1] + self.F_d[0])) / 2
@@ -289,10 +346,10 @@ class Decomposition(object):
 
         # Проверяем, что изменения в валовом выпуске, полученные как сумма факторов (dX и dM) сходятся с разностями
         # X[1] - X[0] и M[1] - M[0], полученными из таблиц (с точностью до 10^-5)
-        assert (sum(self.X[1]) - sum(self.X[0]) - sum(
-            dX) < 1e-5), "Oops! Полученные суммарные изменения в валовом выпуске dX не равны X1 - X0!"
-        assert (sum(self.M[1]) - sum(self.M[0]) - sum(
-            dM) < 1e-5), "Oops! Полученные суммарные изменения в валовом выпуске dM не равны M1 - M0!"
+        #assert (sum(self.X[1]) - sum(self.X[0]) - sum(
+        #    dX) < 1e-5), "Oops! Полученные суммарные изменения в валовом выпуске dX не равны X1 - X0!"
+        #assert (sum(self.M[1]) - sum(self.M[0]) - sum(
+         #   dM) < 1e-5), "Oops! Полученные суммарные изменения в валовом выпуске dM не равны M1 - M0!"
 
         result_tables = {
             "Упрощенная декомпозиция изменений в выпуске и импорте за " + self.my_years + "гг " + self.prices_in: results}
@@ -396,11 +453,11 @@ class Decomposition(object):
         res_perc2.columns.name = "Изменение конечного спроса"
 
         results_perc_d = pd.DataFrame(np.column_stack(dX[:6] / abs(dX_all) * 100), index=self.df_d[0].index,
-                                      columns=res_columns)
+                                      columns=res_columns_perc)
         results_perc_d.columns.name = 'Изменение отечественого выпуска'
 
         results_perc_m = pd.DataFrame(np.column_stack(dM[:6] / abs(dM_all) * 100), index=self.df_d[0].index,
-                                      columns=res_columns)
+                                      columns=res_columns_perc)
         results_perc_m.columns.name = 'Изменение импорта'
 
         # res_perc.loc['Private Households with Employed Persons'] = [0, 100]
@@ -410,8 +467,9 @@ class Decomposition(object):
         # Суммы
         sumss_d = list(map(sum, dX[:6]))
         sumss_m = list(map(sum, dM[:6]))
-        sumss = list(map(operator.add, sumss_d, sumss_m))
+        sumss = list(map(add, sumss_d, sumss_m))
 
+        # TODO: сделать так, чтобы не приходилось отдельно считать Total для каждой таблицы
         # Добавляем строки с суммой в конец таблиц
         res_check_X.loc['Total'] = [sum(dX[7]), sum(dX[6]), Xtot, sum(self.X[1]) - sum(self.X[0])]
         res_check_M.loc['Total'] = [sum(dM[7]), sum(dM[6]), Mtot, sum(self.M[1]) - sum(self.M[0])]
@@ -503,7 +561,7 @@ class Decomposition(object):
         export_ind = export_total - export
 
         dX = technological_change + substitution_national_inputs + final_demands
-        dX[dX == 0] = 1e-20
+        dX[dX == 0] = self.eps0
 
         # Проверяем, что изменения в валовом выпуске, полученные как сумма факторов (dX) сходятся с разностью
         # X[1] - X[0], полученной из таблиц (с точностью до 10^-5)
@@ -546,6 +604,160 @@ class Decomposition(object):
         self.save_to_excel('results_in_percents(Magacho_2018).xlsx', **result_percented_tables)
 
         print("Результат работы метода декомпозиции Magacho_2018 сохранен в папку results!\n")
+
+    def decomposition_Chenery_extended(self):
+        """
+        Расширенный метод декомпозиции Chenery.
+        """
+
+        res_columns = ['Изменения технологии', 'Изменения соотношения отечественных и импортных промежуточных затрат',
+                       'Изменения во внешнем спросе',
+                       'Изменения запаса материальных средств',
+                       'Изменения валого накопления основного капитала',
+                       'Изменения соотношения отечественных и импортных запасов материальных оборотных средств',
+                       'Изменения соотношения отечественного и импортного валого накопления основного капитала',
+                       'Изменения спроса со стороны государства','Изменения спроса со стороны домашних хозяйств',
+                       'Изменения соотношения отечественной продукции к импортной со стороны государства',
+                       'Изменения соотношения отечественной продукции к импортной со стороны домашних хозяйств',
+                       'dX полученный с помощью метода декомпозиции', 'Разность X1 - X0'
+                       ]
+        res_index = ['Выпуск отечественной продукции', 'Всего']
+        res_columns_perc = list(map(self.add_percent_to_column_name, res_columns[:-2]))
+
+        sumL = self.L_d[0] + self.L_d[1]
+        sumW = self.A_m[0].dot(self.L_d[0]) + self.A_m[1].dot(self.L_d[1])
+
+        # Вычисляем абсолютные значения изменений величин
+        dA = self.A[1] - self.A[0]
+        #dI = self.I[1] - self.I[0]
+        # dC = self.C[1] - self.C[0]
+
+        dI_s = self.I_s[1] - self.I_s[0]
+        dI_gfch = self.I_gfch[1] - self.I_gfch[0]
+        dC_g = self.C_g[1] - self.C_g[0]
+        dC_h = self.C_h[1] - self.C_h[0]
+
+        dR_d = self.R_d[1] - self.R_d[0]
+        dR_Is = self.R_Is[1] - self.R_Is[0]
+        dR_Igfch = self.R_Igfch[1] - self.R_Igfch[0]
+        dR_Cg = self.R_Cg[1] - self.R_Cg[0]
+        dR_Ch = self.R_Ch[1] - self.R_Ch[0]
+
+        # Получаем слагаемые декомпозиции изменения выпуска отечественной продукции
+        dX = np.array([np.zeros_like(self.M[0])] * 11)
+        dX[0] = (self.L_d[0].dot(self.R_d[0] * dA).dot(self.X[1]) +
+                 self.L_d[1].dot(self.R_d[1] * dA).dot(self.X[0])) / 2  # изменения технологии
+        dX[1] = (self.L_d[0].dot(dR_d * self.A[1]).dot(self.X[1]) +
+                 self.L_d[1].dot(dR_d * self.A[0]).dot(self.X[0])) / 2  # изменения соотношения отечественных и
+        # импортных промежуточных затрат
+        dX[2] = sumL.dot(self.E[1] - self.E[0]) / 2  # изменения во внешнем спросе
+
+        dX[3] = (self.L_d[0].dot(self.R_Is[0] * dI_s) + self.L_d[1].dot(self.R_Is[1] * dI_s)) / 2 # изменения
+        # запаса материальных средств
+        dX[4] = (self.L_d[0].dot(self.R_Igfch[0] * dI_gfch) + self.L_d[1].dot(self.R_Igfch[1] * dI_gfch)) / 2  # изменения
+        # валого накопления основного капитала
+
+        dX[5] = (self.L_d[0].dot(dR_Is * self.I_s[1]) +
+                 self.L_d[1].dot(dR_Is * self.I_s[0])) / 2  # изменения соотношения отечественных и импортных запасов
+        # материальных оборотных средств
+        dX[6] = (self.L_d[0].dot(dR_Igfch * self.I_gfch[1]) +
+                 self.L_d[1].dot(dR_Igfch * self.I_gfch[0])) / 2  # изменения соотношения отечественного и
+        # импортного валого накопления основного капитала
+
+        dX[7] = (self.L_d[0].dot(self.R_Cg[0] * dC_g) + self.L_d[1].dot(self.R_Cg[1] * dC_g)) / 2  # изменения
+        # спроса со стороны государства
+        dX[8] = (self.L_d[0].dot(self.R_Ch[0] * dC_h) + self.L_d[1].dot( self.R_Ch[1] * dC_h)) / 2  # изменения
+        # спроса со стороны домашних хозяйств
+
+        dX[9] = (self.L_d[0].dot(dR_Cg * self.C_g[1]) +
+                 self.L_d[1].dot(dR_Cg * self.C_g[0])) / 2  # изменения соотношения отечественной продукции к
+        # импортной со стороны государства
+        dX[10] = (self.L_d[0].dot(dR_Ch * self.C_h[1]) +
+                 self.L_d[1].dot(dR_Ch * self.C_h[0])) / 2  # изменения соотношения отечественной продукции к
+        # импортной со стороны домашних хозяйств
+
+
+        dX_all = sum(dX)
+        Xtot = sum(dX_all)
+
+        #dX_I = (self.L_d[0].dot(self.R_In[0] * dI) + self.L_d[1].dot(self.R_In[1] * dI)) / 2  # изменения
+        # инвестиционного спроса на отечественную продукцию
+        #dX_C = (self.L_d[0].dot(self.R_C[0] * dC) + self.L_d[1].dot(self.R_C[1] * dC)) / 2  # изменения
+        # потребительского спроса на отечественную продукцию
+
+        # Получаем слагаемые декомпозиции изменения импорта
+        dM = np.array([np.zeros(len(self.M[0]))] * 12)
+        dM[0] = ((self.A_m[1] - self.A_m[0]).dot(self.L_d[1].dot(self.F_d[1]) + self.L_d[0].dot(self.F_d[0])) +
+                 self.A_m[0].dot(self.L_d[1] - self.L_d[0]).dot(self.F_d[1]) + self.A_m[1].dot(
+            self.L_d[1] - self.L_d[0]).dot(self.F_d[0])) / 2
+
+        dM[1] = self.E_r[1] - self.E_r[0] + sumW.dot(self.E[1] - self.E[0]) / 2
+        dM[2] = self.C_mh[1] - self.C_mh[0] + sumW.dot(self.C_dh[1] - self.C_dh[0]) / 2
+        dM[3] = self.C_mg[1] - self.C_mg[0] + sumW.dot(self.C_dg[1] - self.C_dg[0]) / 2
+        dM[4] = self.I_mgfch[1] - self.I_mgfch[0] + sumW.dot(self.I_dgfch[1] - self.I_dgfch[0]) / 2
+        dM[5] = self.I_ms[1] - self.I_ms[0] + sumW.dot(self.I_ds[1] - self.I_ds[0]) / 2
+        dM_all = dM[0] + dM[1] + dM[2] + dM[3] + dM[4] + dM[5]
+        Mtot = sum(dM_all)
+
+        dM[6] = dM[1] + dM[2] + dM[3] + dM[4] + dM[5]
+        dM[7] = ((self.A_m[1].dot(self.L_d[1]) + self.A_m[0].dot(self.L_d[0])).dot(self.F_d[1] - self.F_d[0])) / 2 + (
+            self.F_m[1] - self.F_m[0])
+
+        # Проверяем, что изменения в валовом выпуске, полученные как сумма факторов (dX_all и dM_all) сходятся с
+        # разностями X[1] - X[0] и M[1] - M[0], полученными из таблиц (с точностью до 10^-5)
+        assert (sum(self.X[1]) - sum(self.X[0]) - sum(
+            dX_all) < 1e-5), "Oops! Полученные суммарные изменения в валовом выпуске dX_all не равны X1 - X0!"
+        #assert (sum(self.M[1]) - sum(self.M[0]) - sum(
+        #    dM_all) < 1e-5), "Oops! Полученные суммарные изменения в валовом выпуске dM_all не равны M1 - M0!"
+
+        # Суммы
+        sumss_d = list(map(sum, dX))
+        sumss_m = list(map(sum, dM))
+        #sumss = list(map(add, sumss_d, sumss_m))
+        dX_all[dX_all == 0] = self.eps0
+
+        # Вывод таблиц
+        result_d = pd.DataFrame(np.column_stack([dX[0],dX[1],dX[2],dX[3],dX[4],dX[5],dX[6],
+                                                 dX[7], dX[8], dX[9], dX[10], dX_all, self.X[1] - self.X[0]]),
+                                columns=res_columns,
+                                index=self.df_d[0].index)
+        result_d.columns.name = 'Выпуск отечественной продукции'
+        #result_m = pd.DataFrame(np.column_stack(dM[:6]), columns=res_columns, index=self.df_d[0].index)
+        #result_m.columns.name = 'Импорт'
+
+        results_perc_d = pd.DataFrame(np.column_stack(dX[:] / abs(dX_all) * 100.), index=self.df_d[
+            0].index,columns=res_columns_perc)
+        results_perc_d.columns.name = 'Изменение отечественого выпуска'
+
+        #results_perc_m = pd.DataFrame(np.column_stack(dM[:] / abs(dM_all) * 100), index=self.df_d[0].index,
+                                      #columns=res_columns_perc)
+        #results_perc_m.columns.name = 'Изменение импорта'
+
+
+        # Добавляем строки с суммой в конец таблиц
+        result_d.loc['Total'] = sumss_d + [Xtot] + [sum(self.X[1]) - sum(self.X[0])]
+        #result_m.loc['Total'] = sumss_m
+        results_perc_d.loc['Total'] = np.array(sumss_d) / abs(Xtot) * 100.
+        #results_perc_m.loc['Total'] = sumss_m / abs(sum(dM_all)) * 100.
+
+
+        result_tables = {#'Декомпозиция изменений выпуска по всем факторам за ' + self.my_years +
+                         #'гг ' + self.prices_in: results,
+                         self.pack_name('Выпуск отечественной продукци за'): result_d}
+                         #'Импорт за ' + self.my_years +
+                         #'гг ' + self.prices_in: result_m}
+
+        percented_result_tables = {#self.pack_name("Декомпозиция изменений выпуска по всем факторам"): results_perc,
+                                   self.pack_name("Декомпозиция изменений отечественного выпуска по всем факторам и "
+                                                  "по всем отраслям"): results_perc_d,
+                                   #"Декомпозиция изменений импорта по всем факторам и по всем отраслям за "
+                                   #+ self.my_years + "гг " + self.prices_in: results_perc_m
+                                  }
+
+        self.save_to_excel('results(Chenery_extended).xlsx', **result_tables)
+        self.save_to_excel('results_in_percents(Chenery_extended).xlsx', **percented_result_tables)
+
+        print("Результат работы метода декомпозиции Chenery_extended сохранен в папку results!\n")
 
     def save_to_excel(self, file_name, rounding="%.3f", **tables):
         """
@@ -601,7 +813,7 @@ class Decomposition(object):
             columns = np.insert(df.columns.values, 0, table_name)
             for col_num, value in enumerate(columns):
                 worksheet.write(0, col_num + 1, value, header_format)
-            worksheet.set_row(0, 60)
+            worksheet.set_row(0, 75)
 
         writer.save()
         workbook.close()
