@@ -153,7 +153,7 @@ class Decomposition(object):
                 df.name = columns.name
 
                 # Делим таблицы на отечественный выпуск и импорт
-                if i == 1:
+                if not i:
                     self.df_d.append(df)
                 else:
                     self.df_m.append(df)
@@ -682,8 +682,8 @@ class Decomposition(object):
         # Получаем слагаемые декомпозиции изменения импорта
         dM = np.array([np.zeros(len(self.M[0]))] * 12)
 
-        dM[0] = ((dA * self.R_m[0]).dot(self.X[1]) + self.A_m[0].dot((self.L_d[0]).dot(self.R_d[0] * dA)).dot(
-            self.X[0]) + (dA * self.R_m[1]).dot(self.X[0]) +
+        dM[0] = ((dA * self.R_m[0]).dot(self.X[1]) + self.A_m[0].dot((self.L_d[0]).dot(self.R_d[0] * dA)).dot(self.X[1]) +
+                 (dA * self.R_m[1]).dot(self.X[0]) +
                  self.A_m[1].dot((self.L_d[1]).dot(self.R_d[1] * dA)).dot(self.X[0])) / 2  # изменения технологии
         dM[1] = (self.A_m[0].dot((self.L_d[0]).dot(dR_d * self.A[1])).dot(self.X[1]) - (dR_d * self.A[1]).dot(self.X[1]) +
                  self.A_m[1].dot((self.L_d[1]).dot(dR_d * self.A[0])).dot(self.X[0]) -
