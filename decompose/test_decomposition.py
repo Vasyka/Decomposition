@@ -1,5 +1,5 @@
 from decompose import *
-
+'''
 # Создаем новый экземпляр класса, загружаем данные и готовим их к декомпозиции
 dec = Decomposition()
 path_and_sheetnames = {"./data/задание 1 для студентов.xlsx": [0, 1]}
@@ -10,8 +10,19 @@ dec.prepare_data(column_order='eng')
 dec.decomposition_Baranov_2016()
 dec.decomposition_Baranov_2018()
 dec.decomposition_Magacho_2018()
+'''
 
+# На новых данных:
+dec1 = Decomposition()
+path_and_sheetnames1 = {"./data/симметричные таблицы WIOD 2003 и 2010 в ценах 2008 25 декабря.xlsx": [0, 1]}
+dec1.load_WIOD2013_merged_data(**path_and_sheetnames1)
+dec1.prepare_data(column_order='eng')
 
+# Запускаем методы декомпозиции
+dec1.decomposition_Baranov_2016()
+dec1.decomposition_Baranov_2018()
+dec1.decomposition_Magacho_2018()
+dec1.decomposition_Chenery_extended()
 
 
 
@@ -25,7 +36,7 @@ dec.prepare_data(column_order='rus')
 dec.decomposition_Baranov_2016()
 dec.decomposition_Baranov_2018()
 dec.decomposition_Magacho_2018()
-
+dec.decomposition_Chenery_extended()
 
 
 
@@ -40,3 +51,4 @@ dec.prepare_data(column_order='rus')
 dec.decomposition_Baranov_2016()
 dec.decomposition_Baranov_2018()
 dec.decomposition_Magacho_2018()
+dec.decomposition_Chenery_extended()
