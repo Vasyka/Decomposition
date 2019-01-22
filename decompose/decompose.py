@@ -634,7 +634,7 @@ class Decomposition(object):
         dC_h = self.C_h[1] - self.C_h[0]
 
         dR_d = self.R_d[1] - self.R_d[0]
-        dR_I = self.R_In[1] - self.R_In[0]
+        dR_In= self.R_In[1] - self.R_In[0]
         dR_Is = self.R_Is[1] - self.R_Is[0]
         dR_Igfch = self.R_Igfch[1] - self.R_Igfch[0]
         dR_Cg = self.R_Cg[1] - self.R_Cg[0]
@@ -654,7 +654,7 @@ class Decomposition(object):
         dX[4] = (self.L_d[0].dot(self.R_Is[0] * dI_s) + self.L_d[1].dot(self.R_Is[1] * dI_s)) / 2  # изменения
         # запаса материальных средств
 
-        dX[5] = (self.L_d[0].dot(dR_I * self.In[1]) + self.L_d[1].dot(dR_I * self.In[0])) / 2 # изменения соотношения
+        dX[5] = (self.L_d[0].dot(dR_In* self.In[1]) + self.L_d[1].dot(dR_In* self.In[0])) / 2 # изменения соотношения
         #  отечественных и импортных инвестиционных продуктов
         dX[6] = (self.L_d[0].dot(dR_Is * self.I_s[1]) +
                  self.L_d[1].dot(dR_Is * self.I_s[0])) / 2  # изменения соотношения отечественных и импортных запасов
@@ -695,27 +695,28 @@ class Decomposition(object):
                  self.A_m[1].dot((self.L_d[1]).dot(self.R_Is[1] * dI_s)) - (self.R_Is[1] * dI_s)) / 2  # изменения
         # запаса материальных средств
 
-        dM[5] = (self.A_m[0].dot((self.L_d[0]).dot(dR_I * self.In[1])) - (dR_I * self.In[1]) +
-                 self.A_m[1].dot((self.L_d[1]).dot(dR_I * self.In[0])) - (dR_I * self.In[0])) / 2  #
+        dM[5] = (self.A_m[0].dot((self.L_d[0]).dot(dR_In* self.In[1])) - (dR_In* self.In[1]) +
+                 self.A_m[1].dot((self.L_d[1]).dot(dR_In* self.In[0])) - (dR_In* self.In[0])) / 2  #
         # изменения соотношения отечественных и импортных инвестиционных продуктов
         dM[6] = (self.A_m[0].dot((self.L_d[0]).dot(dR_Is * self.I_s[1])) - (dR_Is * self.I_s[1]) +
                  self.A_m[1].dot((self.L_d[1]).dot(dR_Is * self.I_s[0])) - (dR_Is * self.I_s[0])) / 2  # изменения соотношения отечественных и импортных запасов
         # материальных оборотных средств
 
-
-        dM[7] = (self.A_m[0].dot((self.L_d[0]).dot(dR_Ch * self.C_h[1])) - (dR_Ch * self.C_h[1]) +
-                 self.A_m[1].dot((self.L_d[1]).dot(dR_Ch * self.C_h[0])) - (dR_Ch * self.C_h[0])) / 2  # изменения
+        dM[7] = (self.A_m[0].dot((self.L_d[0]).dot(self.R_Ch[0] * dC_h)) + 2 * dC_h - (self.R_Ch[0] * dC_h) +
+                 self.A_m[1].dot((self.L_d[1]).dot(self.R_Ch[1] * dC_h)) - (self.R_Ch[1] * dC_h)) / 2  # изменения
         # спроса со стороны домашних хозяйств
-        dM[8] = (self.A_m[0].dot((self.L_d[0]).dot(dR_Cg * self.C_g[1])) - (dR_Cg * self.C_g[1]) +
-                 self.A_m[1].dot((self.L_d[1]).dot(dR_Cg * self.C_g[0])) - (dR_Cg * self.C_g[0])) / 2  # изменения
+        dM[8] = (self.A_m[0].dot((self.L_d[0]).dot(self.R_Cg[0] * dC_g)) + 2 * dC_g - (self.R_Cg[0] * dC_g) +
+                  self.A_m[1].dot((self.L_d[1]).dot(self.R_Cg[1] * dC_g)) - (self.R_Cg[1] * dC_g)) / 2  # изменения
         # спроса со стороны государства
 
-        dM[9] = (self.A_m[0].dot((self.L_d[0]).dot(self.R_Ch[0] * dC_h)) + 2 * dC_h - (self.R_Ch[0] * dC_h) +
-                 self.A_m[1].dot((self.L_d[1]).dot(self.R_Ch[1] * dC_h)) - (self.R_Ch[1] * dC_h)) / 2  # изменения
+        dM[9] = (self.A_m[0].dot((self.L_d[0]).dot(dR_Ch * self.C_h[1])) - (dR_Ch * self.C_h[1]) +
+                 self.A_m[1].dot((self.L_d[1]).dot(dR_Ch * self.C_h[0])) - (dR_Ch * self.C_h[0])) / 2 # изменения
         # соотношения отечественной продукции к импортной со стороны домашних хозяйств
-        dM[10] = (self.A_m[0].dot((self.L_d[0]).dot(self.R_Cg[0] * dC_g)) + 2 * dC_g - (self.R_Cg[0] * dC_g) +
-                 self.A_m[1].dot((self.L_d[1]).dot(self.R_Cg[1] * dC_g)) - (self.R_Cg[1] * dC_g)) / 2  # изменения
+        dM[10] = (self.A_m[0].dot((self.L_d[0]).dot(dR_Cg * self.C_g[1])) - (dR_Cg * self.C_g[1]) +
+                 self.A_m[1].dot((self.L_d[1]).dot(dR_Cg * self.C_g[0])) - (dR_Cg * self.C_g[0])) / 2 # изменения
         # соотношения отечественной продукции к импортной со стороны государства
+
+
 
 
         dM[11] = self.E_r[1] - self.E_r[0]  # реэкспорт
