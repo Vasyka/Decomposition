@@ -126,7 +126,7 @@ class Decomposition(object):
                     d = pd.DataFrame(d, index=df.index, columns=merged)
                     d.loc[:, df.columns] = df
                     df = d
-                    print(df)
+                    #print(df)
                     #self.codes = self.df_m[0].index
 
                 df_all.append(df)
@@ -164,8 +164,8 @@ class Decomposition(object):
                     self.df_d[i] = dom
                 self.codes = self.df_m[0].index
 
-                print(self.df_d[0])
-                print(self.df_d[1])
+                #print(self.df_d[0])
+               # print(self.df_d[1])
 
 
 
@@ -308,7 +308,7 @@ class Decomposition(object):
             z = Z[year]
             f = F[year]
             total = Total[year]
-            print(np.shape(f), np.shape(Total), np.shape(z), np.shape(z.index))
+            #print(np.shape(f), np.shape(Total), np.shape(z), np.shape(z.index))
             for i in range(np.shape(z)[0]):
                 if (abs(sum(z.iloc[i]) + f[i] - total[i]) >= 1e-8):
                     print("Ошибка в таблице \"", z.columns.name, "\" в строке \"", z.index[i],
