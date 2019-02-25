@@ -16,8 +16,10 @@ class Decomposition(object):
 
     Пользовательские методы:
     ------------------------
-    - load_WIOD2013_merged_data(**path_and_sheetnames) - чтение данных из таблиц WIOD release 2013. Таблицы
-    отечественного выпуска и импорта находятся на одной странице, данные за разные годы лежат в одном файле.
+    - load_WIOD2016_merged_data(**path_and_sheetnames) - чтение данных из таблиц WIOD release 2016. (Таблицы
+    отечественного выпуска и импорта находятся на одной странице, данные за разные годы лежат в одном файле)
+    - load_WIOD2013_merged_data(**path_and_sheetnames) - чтение данных из таблиц WIOD release 2013. (Таблицы
+    отечественного выпуска и импорта находятся на одной странице, данные за разные годы лежат в одном файле)
     - load_Rosstat_separated_data(**path_and_sheetnames) - чтение данных из таблиц Росстата. Таблицы отечественного
     выпуска и импорта находятся на разных страницах, данные за разные годы лежат в разных файлах.
     - prepare_data(column_order) - подготовка данных перед декомпозицией
@@ -55,12 +57,122 @@ class Decomposition(object):
         self.years = []  # годы за которые приведены таблицы
         self.df_d = []  # таблицы отечественного выпуска
         self.df_m = []  # таблицы импорта
-        self.eps0 = 1e-20 # хранит число на которое заменяются нули в таблице
+        self.eps0 = 1e-20  # хранит число на которое заменяются нули в таблице
+        self.table_format = ""  # формат входной таблицы(WIOD13/WIOD16/Rosstat)
+
+    def load_WIOD2016_merged_data(self, **path_and_sheetnames):
+        """
+                Чтение данных из таблиц WIOD release 2016. (Таблицы отечественного выпуска и импорта находятся на одной
+                странице, данные за разные годы лежат в одном файле)
+
+                Parameters
+                ----------
+                path_and_sheetnames: dictionary
+                    путь к excel-файлу и страницы в excel-файле
+
+        """
+
+        # Расположение 1ого квадранта таблицы и столбцов\строк с названиями в ней
+        vertical_table_position = slice(4, 91)  # положение и размеры таблицы по вертикали
+        horizontal_table_position = slice(3, 46)  # положение и размеры таблицы по горизонтали
+        #industries_part_position = slice(3, 36)  # положение и размеры части таблицы с промежуточным потреблением по
+        # горизонтали
+        import_industries_part_position = slice(37, 91)  # положение и размеры части таблицы с импортной продукцией
+        # по вертикали
+        domestic_size = import_industries_part_position.start - vertical_table_position.start  # размер таблицы
+        # для отечественного выпуска
+
+        codes_position = 0  # номер столбца в таблице с кодами отраслей
+        columns_names_position = 1  # номер строки в таблице с названиями колонок
+        rows_names_position = 1  # номер столбца в таблице с названиями строк
+
+        df_all = []
+        for path, sheetnames in path_and_sheetnames.items():
+            file = pd.ExcelFile(path)
+            for sheetname in sheetnames:
+                df1 = pd.read_excel(file, sheet_name=sheetname)
+
+                # Получаем имена столбцов и строк
+                rows = df1.iloc[vertical_table_position, rows_names_position]
+                rows.name = ""
+                columns = df1.iloc[columns_names_position, horizontal_table_position]
+                columns.name = df1.columns[0]
+
+
+                # Получаем из таблицы коды отраслей (одинаковые по вертикали и горизонтали)
+                self.codes = df1.iloc[import_industries_part_position, codes_position]
+                #self.codes = df1.iloc[codes_position, industries_part_position]
+                #print(self.codes)
+
+                if not self.codes.any():
+                    print("Задана неправильная позиция таблицы по вертикали!")
+
+                # Сохраняем обрезанную версию таблицы
+                df = df1.iloc[vertical_table_position, horizontal_table_position]
+                df.columns = columns
+                df.index = rows
+                df.name = columns.name
+
+                rows_d = rows[:domestic_size]
+                rows_m = rows.values[domestic_size:].tolist()
+
+                # Добавляем отсутсвующие столбцы
+                if (len(columns[:-7]) != len(rows_m)):
+
+                    d = np.zeros((len(rows), len(rows_m) + 7))
+                    #print(type(rows_m), type(columns[-6:]))
+                    merged = rows_m + columns.tolist()[-7:]
+                    #print(rows_m, columns[-6:],  merged)
+                    d = pd.DataFrame(d, index=df.index, columns=merged)
+                    d.loc[:, df.columns] = df
+                    df = d
+                    print(df)
+                    #self.codes = self.df_m[0].index
+
+                df_all.append(df)
+                self.years.append(re.search("\d+", columns.name).group(0))
+
+            self.table_format = "WIOD16"
+            print("Обрабатываем данные из таблицы в формате " + self.table_format + " \"" + columns.name + "\"")
+
+
+            # Получаем год, в который пересчитаны цены
+            prices_year1 = re.search("\d+", df1.iloc[0, 0])
+            prices_year2 = re.findall("\d+", sheetname)
+            if not prices_year1:
+                if len(prices_year2) > 0:
+                    self.prices_in = prices_year2[1]
+                else:
+                    self.prices_in = "?"
+            else:
+                self.prices_in = prices_year1.group(0)
+            self.prices_in = "(в ценах " + self.prices_in + "года)"
+
+
+            # Делим таблицы на отечественный выпуск и импорт
+            self.df_d = [df_all[0].iloc[:domestic_size], df_all[1].iloc[:domestic_size]]
+            self.df_m = [df_all[0].iloc[domestic_size:], df_all[1].iloc[domestic_size:]]
+
+            # Добавляем пропущенные отрасли в таблицу для отечественной продукции
+            if len(self.df_d[0]) != len(self.df_m[0]):
+                print("Разное количество отраслей у импорта и отечественной продукции!")
+
+                for i in range(0, 2):
+                    dom = np.zeros_like(self.df_m[i])
+                    dom = pd.DataFrame(dom, index=self.df_m[i].index, columns=self.df_d[i].columns)
+                    dom.loc[self.df_d[i].index] = self.df_d[i]
+                    self.df_d[i] = dom
+                self.codes = self.df_m[0].index
+
+                print(self.df_d[0])
+                print(self.df_d[1])
+
+
 
     def load_WIOD2013_merged_data(self, **path_and_sheetnames):
         """
-        Чтение данных из таблиц WIOD release 2013. Таблицы отечественного выпуска и импорта находятся на одной
-        странице, данные за разные годы лежат в одном файле.
+        Чтение данных из таблиц WIOD release 2013. (Таблицы отечественного выпуска и импорта находятся на одной
+        странице, данные за разные годы лежат в одном файле)
 
         Parameters
         ----------
@@ -103,7 +215,8 @@ class Decomposition(object):
                 df_all.append(df)
                 self.years.append(re.search("\d+", columns.name).group(0))
 
-            print("Обрабатываем данные из таблицы \"" + columns.name + "\"")
+            self.table_format = "WIOD13"
+            print("Обрабатываем данные из таблицы в формате " + self.table_format + " \"" + columns.name + "\"")
             self.prices_in = "(в ценах " + re.search("\d+", df1.iloc[0, 0]).group(0) + "года)"
 
             # Делим таблицы на отечественный выпуск и импорт
@@ -158,7 +271,8 @@ class Decomposition(object):
                 else:
                     self.df_m.append(df)
 
-            print("Обрабатываем данные из таблицы \"" + columns.name + "\"")
+            self.table_format = "Rosstat"
+            print("Обрабатываем данные из таблицы в формате " + self.table_format + " \"" + columns.name + "\"")
             self.years.append(re.search("\d+", columns.name).group(0))
 
     def get_by_pos(self, pos):
@@ -194,9 +308,10 @@ class Decomposition(object):
             z = Z[year]
             f = F[year]
             total = Total[year]
-            for i in range(len(total)):
+            print(np.shape(f), np.shape(Total), np.shape(z), np.shape(z.index))
+            for i in range(np.shape(z)[0]):
                 if (abs(sum(z.iloc[i]) + f[i] - total[i]) >= 1e-8):
-                    print("Ошибка в таблице \"", z.columns.name, "\" в строке \"", z.columns[i],
+                    print("Ошибка в таблице \"", z.columns.name, "\" в строке \"", z.index[i],
                           "\" должно быть:", sum(z.iloc[i]) + f[i], ", написано:", total[i])
                     Total[year][i] = sum(z.iloc[i]) + f[i]
         return Total
@@ -221,14 +336,15 @@ class Decomposition(object):
         Подготовка данных перед декомпозицией
 
         column_order: string
-            Порядок столбцов в таблице "eng" - households, NPISH, government or "rus" - households, government, NPISH
+            Порядок столбцов в таблице "WIOD" - households, NPISH, government or "Rosstat" - households, government,
+            NPISH
         """
         self.columns = self.df_d[0].columns.values
         self.my_years = self.years[0] + "-" + self.years[1]
         length = len(self.columns) - 7
-        os.makedirs("./results/" + self.my_years, exist_ok=True)
+        os.makedirs("./results/" + self.my_years + "/" + self.table_format, exist_ok=True)
 
-        if column_order == 'eng':
+        if column_order == 'WIOD':
             self.C_mnpish, self.C_dnpish = self.get_by_pos(-6)
             self.C_mg, self.C_dg = self.get_by_pos(-5)
         else:
@@ -272,6 +388,7 @@ class Decomposition(object):
 
         # TODO: Переписать для pandas dataframe
         # Вычисляем матрицы технических коэффициентов
+        print(np.shape(Z_d[0]), np.shape(self.X[0]))
         self.A_d = [(Z_d[0] / self.X[0]).astype('float'), (Z_d[1] / self.X[1]).astype('float')]
         self.A_m = [Z_m[0] / self.X[0], Z_m[1] / self.X[1]]
         self.A = [(self.A_d[0] + self.A_m[0]).astype('float'), (self.A_d[1] + self.A_m[1]).astype('float')]
@@ -804,7 +921,9 @@ class Decomposition(object):
             Словарь из названий таблиц и самих таблиц
 
         """
-        writer = pd.ExcelWriter("./results/" + self.my_years + "/" + file_name, engine='xlsxwriter')
+        wiod16_flag = "w16" if self.table_format == "WIOD16" else ""
+        writer = pd.ExcelWriter("./results/" + self.my_years + "/" + self.table_format + "/" + wiod16_flag + file_name,
+                                engine='xlsxwriter')
         workbook = writer.book
 
         for table_name, df in tables.items():
@@ -833,7 +952,7 @@ class Decomposition(object):
 
             # Add codes & index
             if len(df.index) > len(self.codes):
-                codes2 = pd.concat([pd.Series(['']), self.codes])
+                codes2 = pd.concat([pd.Series(['']), pd.DataFrame(self.codes.tolist())])
                 worksheet.write_column('A1', codes2, header_format)
             worksheet.write_column('B1', np.insert(df.index.values, 0, ''), header_format)
             worksheet.set_column('B:B', 45)
