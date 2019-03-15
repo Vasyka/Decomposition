@@ -12,6 +12,11 @@ dec.decomposition_Baranov_2018()
 dec.decomposition_Magacho_2018()
 '''
 
+# World WIOD2013
+dec = Decomposition()
+dec.load_WIOD2013_world()
+
+'''
 #Для WIOD16 года
 # Создаем новый экземпляр класса, загружаем данные и готовим их к декомпозиции
 dec = Decomposition()
@@ -78,5 +83,5 @@ dec.prepare_data(column_order='Rosstat')
 # Запускаем методы декомпозиции
 dec.decomposition_Baranov_2016()
 dec.decomposition_Baranov_2018()
-dec.decomposition_Magacho_2018()
-dec.decomposition_Chenery_extended()
+dec.decomposition_Magacho_2018()'''
+#dec.decomposition_Chenery_extended()

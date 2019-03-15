@@ -5,6 +5,7 @@ from operator import add
 
 import numpy as np
 import pandas as pd
+import timeit
 
 # Отключаем warnings
 warnings.simplefilter("ignore")
@@ -59,6 +60,46 @@ class Decomposition(object):
         self.df_m = []  # таблицы импорта
         self.eps0 = 1e-20  # хранит число на которое заменяются нули в таблице
         self.table_format = ""  # формат входной таблицы(WIOD13/WIOD16/Rosstat)
+
+    def load_WIOD2013_world(self, country = "BRA"):  # очень долго работает: 20s - 1 мировая таблица
+        """
+            Чтение данных из мировых таблиц WIOD release 2013. (Таблицы отечественного выпуска и импорта находятся на
+            одной странице, данные за разные годы лежат в одном файле)
+
+            Parameters
+            ----------
+            path_and_sheetnames: dictionary
+                путь к excel-файлу и страницы в excel-файле
+
+        """
+        # Расположение 1ого квадранта таблицы и столбцов\строк с названиями в ней
+        vertical_table_position = slice(5, 75)  # положение и размеры таблицы по вертикали
+        horizontal_table_position = slice(4, 46)  # положение и размеры таблицы по горизонтали
+        industries_part_position = slice(4, 39)  # положение и размеры части таблицы с промежуточным потреблением по
+        # горизонтали
+        codes_position = 1  # номер строки в таблице с кодами отраслей
+        columns_names_position = 2  # номер строки в таблице с названиями колонок
+        rows_names_position = 1  # номер столбца в таблице с названиями строк
+        countries_names_col = 2 # номер столбца в таблице с названиями стран
+        countries_names_row = 3  # номер строки в таблице с названиями стран
+
+        start_year = 95
+        end_year = 96
+        file_path = "./data/raw_wiod13/wiot" + str(start_year) + "_row_apr12.xlsx"
+
+
+        start = timeit.default_timer()
+        file = pd.ExcelFile(file_path)
+        world_df1 = pd.read_excel(file, sheet_name=0)
+        print(world_df1.head())
+
+        countries_col = world_df1.iloc[:,countries_names_col]
+        print(world_df1.iloc[countries_names_row,:])
+        print(countries_col[countries_col == 'BRA'])
+
+        print(timeit.default_timer() - start,'s')
+
+
 
     def load_WIOD2016_merged_data(self, **path_and_sheetnames):
         """
@@ -166,7 +207,6 @@ class Decomposition(object):
 
                 #print(self.df_d[0])
                # print(self.df_d[1])
-
 
 
     def load_WIOD2013_merged_data(self, **path_and_sheetnames):
